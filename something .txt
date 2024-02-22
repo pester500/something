@@ -1,114 +1,86 @@
-package mailhog
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.Network;
 
+public class MailhogContainerExample {
+    public static void main(String[] args) {
+        // Define a network for the container
+        Network network = Network.newNetwork();
 
-/*
-dependencies:
-    testImplementation("org.testcontainers:testcontainers:1.15.2")
-    testImplementation(platform("org.http4k:http4k-bom:4.3.5.4"))
-    testImplementation("org.http4k:http4k-core")
-    testImplementation("org.http4k:http4k-client-apache") {
-        because("mailhog http api messages access")
-    }
-    testImplementation("org.http4k:http4k-format-jackson") {
-        because("mailhog messages access unmarshalling")
-    }
-    testImplementation("com.sun.mail:javax.mail:1.5.6") {
-        because("mailhog messages decoding")
-    }
- */
-import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
-import mailhog.MailhogJackson.auto
-import org.http4k.client.ApacheClient
-import org.http4k.core.Body
-import org.http4k.core.Method
-import org.http4k.core.Request
-import org.http4k.format.ConfigurableJackson
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
-import javax.mail.internet.MimeUtility
+        // Create a Mailhog container
+        GenericContainer<?> mailhogContainer = new GenericContainer<>("mailhog/mailhog")
+                .withExposedPorts(1025, 8025) // Expose SMTP and HTTP ports
+                .withNetwork(network);
 
-/**
- * A test container for mailhog, to allow to test sending emails with a real smtp server.
- *
- * Example of use:
- * <code>
- *     @Container
- *     val mailhog = MailhogContainer()
- *
- *     @Test fun `my_test`() {
- *       myMailServiceUnderTest.setupSmtp(mailhog.smtpHost, mailhog.smtpPort)
- *
- *       myMailServiceUnderTest.sendAMail()
- *
- *       val messages = mailhog.messages
- *       expectThat(messages).hasSize(1)
- *
- *       expectThat(messages)
- *           .filter { it.to.map { it.address }.contains("test1@email.com") }
- *           .hasSize(1).first().and {
- *               get { subject }.contains("My Test")
- *               get { body }.contains("Hello!")
- *           }
- *     }
- * </code>
- */
-class MailhogContainer: GenericContainer<MailhogContainer>("mailhog/mailhog") {
-    private val PORT_SMTP = 1025
-    private val PORT_HTTP = 8025
+        // Start the container
+        mailhogContainer.start();
 
-    init {
-        withExposedPorts(PORT_SMTP, PORT_HTTP)
-        waitingFor(Wait.forHttp("/"))
-    }
+        // Get the container's host and port for SMTP and HTTP
+        String smtpHost = mailhogContainer.getContainerIpAddress();
+        Integer smtpPort = mailhogContainer.getMappedPort(1025);
+        Integer httpPort = mailhogContainer.getMappedPort(8025);
 
-    val smtpPort get() = getMappedPort(PORT_SMTP)
-    val smtpHost get() = getContainerIpAddress()
-    val httpUrl get() = "http://${getContainerIpAddress()}:${getMappedPort(PORT_HTTP)}"
+        // Use the host and ports for testing
+        System.out.println("Mailhog SMTP Host: " + smtpHost);
+        System.out.println("Mailhog SMTP Port: " + smtpPort);
+        System.out.println("Mailhog HTTP Port: " + httpPort);
 
-    val messages get() = messagesBodyLens(client(Request(Method.GET, httpUrl + "/api/v2/messages")))
-        .items?.map { it.toMailMessage() }?:listOf()
-
-    companion object {
-        val messagesBodyLens = Body.auto<MailhogMessages>().toLens()
-        val client = ApacheClient()
+        // Stop the container after testing
+        mailhogContainer.stop();
     }
 }
 
-// message structure for easy common use case testing
-data class MailMessage(val from:EmailAddress, val to:List<EmailAddress>, val subject:String, val body:String)
-data class EmailAddress(val address:String)
 
-fun MailhogMessage.toMailMessage() = MailMessage(
-    from = From?.toEmailAddress()?:throw IllegalArgumentException("no from address"),
-    to = (To?:listOf()).map { it.toEmailAddress() },
-    subject = Content?.Headers?.get(MailhogMailHeaders.Subject.name)?.firstOrNull().orEmpty(),
-    body = Content?.Body.orEmpty()
-        .let { MimeUtility.decode(it.byteInputStream(), "quoted-printable").bufferedReader().readText() }
-)
 
-fun MailhogEmailAddress.toEmailAddress() = EmailAddress(Mailbox.orEmpty() + "@" + Domain.orEmpty())
 
-// raw Mailhog data structure
-data class MailhogMessages(val total: Number?, val count: Number?, val start: Number?, val items: List<MailhogMessage>?)
+import javax.mail.*;
+import javax.mail.internet.*;
+import java.util.Properties;
 
-data class MailhogMessage(val ID: String?, val From: MailhogEmailAddress?, val To: List<MailhogEmailAddress>?, val Content: MailhogContent?, val Created: String?, val MIME: Any?, val Raw: MailhogRaw?)
+public class MailhogEmailClient {
+    public static void main(String[] args) throws MessagingException {
+        // Mailhog container SMTP configuration
+        String mailhogHost = "localhost"; // or the actual host if running remotely
+        int mailhogPort = 1025;
 
-data class MailhogEmailAddress(val Relays: Any?, val Mailbox: String?, val Domain: String?, val Params: String?)
+        // Test email credentials
+        String recipient = "recipient@example.com";
 
-data class MailhogContent(val Headers: Map<String, List<String>>, val Body: String?, val Size: Number?, val MIME: Any?)
+        // JavaMail API properties
+        Properties properties = new Properties();
+        properties.setProperty("mail.smtp.host", mailhogHost);
+        properties.setProperty("mail.smtp.port", String.valueOf(mailhogPort));
 
-data class MailhogRaw(val From: String?, val To: List<String>?, val Data: String?, val Helo: String?)
+        // Session object to authenticate the session
+        Session session = Session.getInstance(properties);
 
-enum class MailhogMailHeaders {
-    `Content-Transfer-Encoding`, `Content-Type`, Date, From,
-    `MIME-Version`, `Message-ID`, Received, `Return-Path`, Subject, To
+        try {
+            // Create a POP3 Store object and connect to the Mailhog container
+            Store store = session.getStore("pop3");
+            store.connect(mailhogHost, mailhogPort, null, null);
+
+            // Get the Inbox folder
+            Folder inbox = store.getFolder("INBOX");
+            inbox.open(Folder.READ_ONLY);
+
+            // Fetch messages from the Inbox
+            Message[] messages = inbox.getMessages();
+            System.out.println("Total messages in Inbox: " + messages.length);
+
+            // Print each message's subject
+            for (int i = 0; i < messages.length; i++) {
+                Message message = messages[i];
+                String subject = message.getSubject();
+                System.out.println("Message " + (i + 1) + ": " + subject);
+            }
+
+            // Close the connection
+            inbox.close(false);
+            store.close();
+
+        } catch (NoSuchProviderException e) {
+            e.printStackTrace();
+        } catch (MessagingException e) {
+            e.printStackTrace();
+        }
+    }
 }
-
-object MailhogJackson : ConfigurableJackson(
-    ObjectMapper()
-    .registerModule(KotlinModule())
-    .deactivateDefaultTyping()
-    .setSerializationInclusion(JsonInclude.Include.NON_NULL)
-)
