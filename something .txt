@@ -1,86 +1,60 @@
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.Network;
+import com.sun.mail.smtp.SMTPServer;
+import com.sun.mail.smtp.SMTPHandler;
 
-public class MailhogContainerExample {
+import java.io.*;
+
+public class MailServer {
+
+    private static final String STORAGE_DIRECTORY = "emails";
+
     public static void main(String[] args) {
-        // Define a network for the container
-        Network network = Network.newNetwork();
+        // Create storage directory if not exists
+        File storageDir = new File(STORAGE_DIRECTORY);
+        if (!storageDir.exists()) {
+            storageDir.mkdirs();
+        }
 
-        // Create a Mailhog container
-        GenericContainer<?> mailhogContainer = new GenericContainer<>("mailhog/mailhog")
-                .withExposedPorts(1025, 8025) // Expose SMTP and HTTP ports
-                .withNetwork(network);
+        // Create an SMTP server listening on port 25
+        SMTPServer server = new SMTPServer(new SimpleMessageHandlerFactory());
 
-        // Start the container
-        mailhogContainer.start();
-
-        // Get the container's host and port for SMTP and HTTP
-        String smtpHost = mailhogContainer.getContainerIpAddress();
-        Integer smtpPort = mailhogContainer.getMappedPort(1025);
-        Integer httpPort = mailhogContainer.getMappedPort(8025);
-
-        // Use the host and ports for testing
-        System.out.println("Mailhog SMTP Host: " + smtpHost);
-        System.out.println("Mailhog SMTP Port: " + smtpPort);
-        System.out.println("Mailhog HTTP Port: " + httpPort);
-
-        // Stop the container after testing
-        mailhogContainer.stop();
+        // Start the server
+        server.start();
+        System.out.println("Mail server started on port 25...");
     }
-}
 
+    static class SimpleMessageHandlerFactory implements SMTPHandlerFactory {
+        public SMTPHandler create(SMTPServer server) {
+            return new SimpleMessageHandler(server);
+        }
+    }
 
+    static class SimpleMessageHandler extends SMTPHandler {
+        public SimpleMessageHandler(SMTPServer server) {
+            super(server);
+        }
 
+        public void from(String sender) throws RejectException {
+            System.out.println("Sender: " + sender);
+        }
 
-import javax.mail.*;
-import javax.mail.internet.*;
-import java.util.Properties;
+        public void recipient(String recipient) throws RejectException {
+            System.out.println("Recipient: " + recipient);
+        }
 
-public class MailhogEmailClient {
-    public static void main(String[] args) throws MessagingException {
-        // Mailhog container SMTP configuration
-        String mailhogHost = "localhost"; // or the actual host if running remotely
-        int mailhogPort = 1025;
-
-        // Test email credentials
-        String recipient = "recipient@example.com";
-
-        // JavaMail API properties
-        Properties properties = new Properties();
-        properties.setProperty("mail.smtp.host", mailhogHost);
-        properties.setProperty("mail.smtp.port", String.valueOf(mailhogPort));
-
-        // Session object to authenticate the session
-        Session session = Session.getInstance(properties);
-
-        try {
-            // Create a POP3 Store object and connect to the Mailhog container
-            Store store = session.getStore("pop3");
-            store.connect(mailhogHost, mailhogPort, null, null);
-
-            // Get the Inbox folder
-            Folder inbox = store.getFolder("INBOX");
-            inbox.open(Folder.READ_ONLY);
-
-            // Fetch messages from the Inbox
-            Message[] messages = inbox.getMessages();
-            System.out.println("Total messages in Inbox: " + messages.length);
-
-            // Print each message's subject
-            for (int i = 0; i < messages.length; i++) {
-                Message message = messages[i];
-                String subject = message.getSubject();
-                System.out.println("Message " + (i + 1) + ": " + subject);
+        public void data(InputStream data) throws IOException {
+            // Save the message to a file in the storage directory
+            File emailFile = new File(STORAGE_DIRECTORY, "email_" + System.currentTimeMillis() + ".txt");
+            try (FileOutputStream outputStream = new FileOutputStream(emailFile)) {
+                // Copy message data to the file
+                byte[] buffer = new byte[1024];
+                int bytesRead;
+                while ((bytesRead = data.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+                System.out.println("Email saved to: " + emailFile.getAbsolutePath());
+            } catch (IOException e) {
+                System.err.println("Error saving email: " + e.getMessage());
             }
-
-            // Close the connection
-            inbox.close(false);
-            store.close();
-
-        } catch (NoSuchProviderException e) {
-            e.printStackTrace();
-        } catch (MessagingException e) {
-            e.printStackTrace();
         }
     }
 }
