@@ -1,19 +1,17 @@
 import com.sun.mail.smtp.SMTPServer;
 import com.sun.mail.smtp.SMTPHandler;
+import com.sun.mail.smtp.SMTPHandlerFactory;
 
+import javax.mail.Message;
+import javax.mail.MessagingException;
+import javax.mail.Session;
+import javax.mail.internet.MimeMessage;
 import java.io.*;
+import java.util.Properties;
 
 public class MailServer {
 
-    private static final String STORAGE_DIRECTORY = "emails";
-
     public static void main(String[] args) {
-        // Create storage directory if not exists
-        File storageDir = new File(STORAGE_DIRECTORY);
-        if (!storageDir.exists()) {
-            storageDir.mkdirs();
-        }
-
         // Create an SMTP server listening on port 25
         SMTPServer server = new SMTPServer(new SimpleMessageHandlerFactory());
 
@@ -42,18 +40,37 @@ public class MailServer {
         }
 
         public void data(InputStream data) throws IOException {
-            // Save the message to a file in the storage directory
-            File emailFile = new File(STORAGE_DIRECTORY, "email_" + System.currentTimeMillis() + ".txt");
-            try (FileOutputStream outputStream = new FileOutputStream(emailFile)) {
-                // Copy message data to the file
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-                while ((bytesRead = data.read(buffer)) != -1) {
-                    outputStream.write(buffer, 0, bytesRead);
-                }
-                System.out.println("Email saved to: " + emailFile.getAbsolutePath());
-            } catch (IOException e) {
-                System.err.println("Error saving email: " + e.getMessage());
+            // Do something with the message data
+            System.out.println("Received message:");
+
+            try {
+                Properties properties = System.getProperties();
+                Session session = Session.getDefaultInstance(properties);
+                MimeMessage message = new MimeMessage(session, data);
+
+                // Store the message in a file
+                storeMessage(message);
+
+                // Print message contents
+                message.writeTo(System.out);
+
+            } catch (MessagingException e) {
+                e.printStackTrace();
+            }
+        }
+
+        private void storeMessage(Message message) {
+            try {
+                // Store the message in a file (You can replace "messages.txt" with any file name you prefer)
+                File file = new File("messages.txt");
+                FileWriter fileWriter = new FileWriter(file, true); // Append mode
+                BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
+                message.writeTo(bufferedWriter);
+                bufferedWriter.newLine();
+                bufferedWriter.close();
+                System.out.println("Message stored in messages.txt");
+            } catch (IOException | MessagingException e) {
+                e.printStackTrace();
             }
         }
     }
