@@ -1,77 +1,52 @@
-import com.sun.mail.smtp.SMTPServer;
-import com.sun.mail.smtp.SMTPHandler;
-import com.sun.mail.smtp.SMTPHandlerFactory;
+import com.icegreen.greenmail.util.GreenMail;
+import com.icegreen.greenmail.util.ServerSetup;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import javax.mail.Message;
 import javax.mail.MessagingException;
-import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
-import java.io.*;
-import java.util.Properties;
 
-public class MailServer {
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-    public static void main(String[] args) {
-        // Create an SMTP server listening on port 25
-        SMTPServer server = new SMTPServer(new SimpleMessageHandlerFactory());
+public class EmailServerTest {
 
-        // Start the server
-        server.start();
-        System.out.println("Mail server started on port 25...");
+    private GreenMail greenMail;
+
+    @BeforeEach
+    public void setUp() {
+        // Create GreenMail server with SMTP port 3025
+        ServerSetup setup = new ServerSetup(3025, null, "smtp");
+        greenMail = new GreenMail(setup);
+        greenMail.start();
     }
 
-    static class SimpleMessageHandlerFactory implements SMTPHandlerFactory {
-        public SMTPHandler create(SMTPServer server) {
-            return new SimpleMessageHandler(server);
-        }
+    @AfterEach
+    public void tearDown() {
+        // Stop GreenMail server
+        greenMail.stop();
     }
 
-    static class SimpleMessageHandler extends SMTPHandler {
-        public SimpleMessageHandler(SMTPServer server) {
-            super(server);
-        }
+    @Test
+    public void testEmailReceived() throws MessagingException {
+        // Send an email to the test server
+        javax.mail.internet.MimeMessage message = new MimeMessage((javax.mail.Session) null);
+        message.setFrom("sender@example.com");
+        message.setRecipients(javax.mail.Message.RecipientType.TO, "recipient@example.com");
+        message.setSubject("Test Email");
+        message.setText("This is a test email");
 
-        public void from(String sender) throws RejectException {
-            System.out.println("Sender: " + sender);
-        }
+        javax.mail.Transport.send(message);
 
-        public void recipient(String recipient) throws RejectException {
-            System.out.println("Recipient: " + recipient);
-        }
+        // Wait for the email to be received
+        greenMail.waitForIncomingEmail(5000, 1);
 
-        public void data(InputStream data) throws IOException {
-            // Do something with the message data
-            System.out.println("Received message:");
+        // Retrieve received emails
+        MimeMessage[] receivedMessages = greenMail.getReceivedMessages();
+        assertEquals(1, receivedMessages.length);
 
-            try {
-                Properties properties = System.getProperties();
-                Session session = Session.getDefaultInstance(properties);
-                MimeMessage message = new MimeMessage(session, data);
-
-                // Store the message in a file
-                storeMessage(message);
-
-                // Print message contents
-                message.writeTo(System.out);
-
-            } catch (MessagingException e) {
-                e.printStackTrace();
-            }
-        }
-
-        private void storeMessage(Message message) {
-            try {
-                // Store the message in a file (You can replace "messages.txt" with any file name you prefer)
-                File file = new File("messages.txt");
-                FileWriter fileWriter = new FileWriter(file, true); // Append mode
-                BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
-                message.writeTo(bufferedWriter);
-                bufferedWriter.newLine();
-                bufferedWriter.close();
-                System.out.println("Message stored in messages.txt");
-            } catch (IOException | MessagingException e) {
-                e.printStackTrace();
-            }
-        }
+        // Verify the content of the received email
+        assertEquals("Test Email", receivedMessages[0].getSubject());
+        assertEquals("This is a test email", receivedMessages[0].getContent().toString().trim());
     }
 }
